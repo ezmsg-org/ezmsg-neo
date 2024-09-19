@@ -9,7 +9,7 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "ezmsg",
+    "ezmsg>=3.5.0",
     "neo>=0.13.3",
 ]
 
@@ -30,4 +30,3 @@ path = "src/ezmsg/neo/__init__.py"
 pattern = true
 
 [tool.uv.sources]
-ezmsg = { git = "https://github.com/ezmsg-org/ezmsg" }

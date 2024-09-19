@@ -21,10 +21,14 @@ wheels = [
 
 [[package]]
 name = "ezmsg"
-version = "3.4.0"
-source = { git = "https://github.com/ezmsg-org/ezmsg#49506a08d891e6ef151c422cc2a736ad4fc5b491" }
+version = "3.5.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/48/a7/7e228053869f41c9e71d7fca1111fffdb3716ec8307de1aca1b57c845d9d/ezmsg-3.5.0.tar.gz", hash = "sha256:1b08972f1231299b7148d383519374113e5b44e9eaf7bf287baa60be40aa21cd", size = 136358 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/53/42cfc9f0c5f1dfb4715b5e5dfe6abc279c4e83814488d1d5ecd361ec527b/ezmsg-3.5.0-py3-none-any.whl", hash = "sha256:f37864d46ecf5f75de5d8a89253f8c19563ecd5fe8beeddf2b334ef000319ff9", size = 67621 },
 ]
 
 [[package]]
@@ -43,7 +47,7 @@ tests = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ezmsg", git = "https://github.com/ezmsg-org/ezmsg" },
+    { name = "ezmsg", specifier = ">=3.5.0" },
     { name = "neo", specifier = ">=0.13.3" },
     { name = "pytest", marker = "extra == 'tests'", specifier = ">=8.3.3" },
 ]
