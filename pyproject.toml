@@ -1,6 +1,5 @@
 [project]
 name = "ezmsg-neo"
-version = "0.1.0"
 description = "Load and stream data from neo files into ezmsg."
 authors = [
   { name = "Chadwick Boulay", email = "chadwick.boulay@gmail.com" },
@@ -12,6 +11,7 @@ dependencies = [
     "ezmsg>=3.5.0",
     "neo>=0.13.3",
 ]
+dynamic = ["version"]
 
 [project.optional-dependencies]
 tests = [
@@ -19,14 +19,21 @@ tests = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/ezmsg/neo/__version__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ezmsg"]
 
-[tool.hatch.build.hooks.version]
-path = "src/ezmsg/neo/__init__.py"
-pattern = true
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.6.8",
+]
 
 [tool.uv.sources]
