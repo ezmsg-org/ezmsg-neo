@@ -1,6 +1,6 @@
 import asyncio
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import replace
 import os
 from pathlib import Path
 import time
@@ -32,7 +32,9 @@ class NeoIterator:
 
     def _reset(self):
         self._playback_state = {
-            "t_offset": self._settings.t_offset if self._settings.t_offset is not None else time.time(),
+            "t_offset": self._settings.t_offset
+            if self._settings.t_offset is not None
+            else time.time(),
             "t_start": np.inf,
             "chunk_ix": 0,
             "msg_queue": deque(),
@@ -67,7 +69,9 @@ class NeoIterator:
         # Fill out metadata for analogsignal streams
         for strm_ix in range(nb_sig_streams):
             t_start = self._reader.get_signal_t_start(0, 0, strm_ix)
-            self._playback_state["t_start"] = min(self._playback_state["t_start"], t_start)
+            self._playback_state["t_start"] = min(
+                self._playback_state["t_start"], t_start
+            )
             nb_chans = self._reader.signal_channels_count(strm_ix)
             fs = self._reader.get_signal_sampling_rate(strm_ix)
             nb_samps = self._reader.get_signal_size(0, 0, strm_ix)
@@ -110,7 +114,9 @@ class NeoIterator:
         # nb_unit = self._reader.spike_channels_count()
 
         t_elapsed = t_stop - self._playback_state["t_start"]
-        self._playback_state["n_chunks"] = int(np.ceil(t_elapsed / self._settings.chunk_dur))
+        self._playback_state["n_chunks"] = int(
+            np.ceil(t_elapsed / self._settings.chunk_dur)
+        )
 
     def __iter__(self):
         self._reset()
@@ -118,7 +124,10 @@ class NeoIterator:
 
     def _chunk_step(self):
         state = self._playback_state
-        t_range = (state["chunk_ix"] * self._settings.chunk_dur, (state["chunk_ix"] + 1) * self._settings.chunk_dur)
+        t_range = (
+            state["chunk_ix"] * self._settings.chunk_dur,
+            (state["chunk_ix"] + 1) * self._settings.chunk_dur,
+        )
 
         for key, strm in state["streams"].items():
             if strm["type"] == "analogsignal":
@@ -139,7 +148,10 @@ class NeoIterator:
                         data=dat,
                         axes={
                             "ch": strm["template"].axes["ch"],
-                            "time": replace(strm["template"].axes["time"], offset=t_range[0] + state["t_offset"]),
+                            "time": replace(
+                                strm["template"].axes["time"],
+                                offset=t_range[0] + state["t_offset"],
+                            ),
                         },
                     )
                     state["msg_queue"].append(msg)
@@ -147,20 +159,28 @@ class NeoIterator:
             elif strm["type"] == "event":
                 # TODO: Event should probably use SampleTriggerMessage
                 for ev_ch_ix in range(strm["nchan"]):
-                    ev_timestamps, ev_durations, ev_labels = self._reader.get_event_timestamps(
-                        block_index=0, seg_index=0, event_channel_index=ev_ch_ix, t_start=t_range[0], t_stop=t_range[1]
+                    ev_timestamps, ev_durations, ev_labels = (
+                        self._reader.get_event_timestamps(
+                            block_index=0,
+                            seg_index=0,
+                            event_channel_index=ev_ch_ix,
+                            t_start=t_range[0],
+                            t_stop=t_range[1],
+                        )
                     )
-                    ev_times = self._reader.rescale_event_timestamp(ev_timestamps, dtype=float)
-                    for t, l in zip(ev_times, ev_labels):
+                    ev_times = self._reader.rescale_event_timestamp(
+                        ev_timestamps, dtype=float
+                    )
+                    for ev_t, ev_l in zip(ev_times, ev_labels):
                         msg = replace(
                             strm["template"],
                             data=np.array(
-                                [l],
+                                [ev_l],
                             ),
                             axes={
                                 "time": replace(
                                     strm["template"].axes["time"],
-                                    offset=t + state["t_offset"],
+                                    offset=ev_t + state["t_offset"],
                                 ),
                             },
                         )

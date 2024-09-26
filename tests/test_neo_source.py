@@ -1,9 +1,9 @@
-import os
-from pathlib import Path
+# import os
+# from pathlib import Path
 
 from ezmsg.neo.source import NeoIterator, NeoIteratorSettings
 
-"""
+
 def test_brainvision_playback():
 
     source_path = None  # TODO - web source.
@@ -18,4 +18,3 @@ def test_brainvision_playback():
             data_msg_count += 1
 
     print(f"Data messages: {data_msg_count}")
-"""
