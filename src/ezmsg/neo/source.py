@@ -1,15 +1,13 @@
 import asyncio
 from collections import deque
-from dataclasses import replace
 import os
 from pathlib import Path
 import time
 import typing
 
 import ezmsg.core as ez
-
-from .util import AxisArray  # This one has labels field.
 from ezmsg.util.generator import GenState
+from ezmsg.util.messages.axisarray import AxisArray, replace
 import neo.rawio.baserawio
 import numpy as np
 
@@ -50,6 +48,8 @@ class NeoIterator:
 
         if fpath.suffix == ".vhdr":
             from neo.rawio import BrainVisionRawIO as RawIO
+        elif fpath.suffix.startswith(".ns") or fpath.suffix == ".nev":
+            from neo.rawio import BlackrockRawIO as RawIO
         else:
             raise ValueError(f"Unsupported file type: {fpath.suffix}")
 
@@ -82,8 +82,10 @@ class NeoIterator:
                 data=np.zeros((0, nb_chans), dtype=float),
                 dims=["time", "ch"],
                 axes={
-                    "time": AxisArray.Axis.TimeAxis(fs=fs, offset=0.0),
-                    "ch": AxisArray.Axis(labels=chan_struct_arr["name"].tolist()),
+                    "time": AxisArray.TimeAxis(fs=fs, offset=0.0),
+                    "ch": AxisArray.CoordinateAxis(
+                        data=chan_struct_arr["name"], dims=["ch"], unit="label"
+                    ),
                 },
                 key=key,
             )
@@ -105,7 +107,11 @@ class NeoIterator:
                 "template": AxisArray(
                     data=np.array([""]),
                     dims=["time"],
-                    axes={"time": AxisArray.Axis.TimeAxis(fs=1, offset=0.0)},
+                    axes={
+                        "time": AxisArray.CoordinateAxis(
+                            data=np.array([0]), dims=["time"], unit="s"
+                        )
+                    },
                     key="events",
                 ),
             }
@@ -124,10 +130,10 @@ class NeoIterator:
 
     def _chunk_step(self):
         state = self._playback_state
-        t_range = (
-            state["chunk_ix"] * self._settings.chunk_dur,
-            (state["chunk_ix"] + 1) * self._settings.chunk_dur,
-        )
+        t_range = (np.arange(2) + state["chunk_ix"]) * self._settings.chunk_dur
+        if True:
+            # Offset by global t_start
+            t_range += self._playback_state["t_start"]
 
         for key, strm in state["streams"].items():
             if strm["type"] == "analogsignal":
@@ -147,10 +153,10 @@ class NeoIterator:
                         strm["template"],
                         data=dat,
                         axes={
-                            "ch": strm["template"].axes["ch"],
+                            **strm["template"].axes,
                             "time": replace(
                                 strm["template"].axes["time"],
-                                offset=t_range[0] + state["t_offset"],
+                                offset=state["t_offset"] + prev_samp / fs,
                             ),
                         },
                     )
@@ -168,23 +174,23 @@ class NeoIterator:
                             t_stop=t_range[1],
                         )
                     )
+                    if len(ev_timestamps) == 0:
+                        continue
                     ev_times = self._reader.rescale_event_timestamp(
                         ev_timestamps, dtype=float
                     )
-                    for ev_t, ev_l in zip(ev_times, ev_labels):
-                        msg = replace(
-                            strm["template"],
-                            data=np.array(
-                                [ev_l],
-                            ),
-                            axes={
-                                "time": replace(
-                                    strm["template"].axes["time"],
-                                    offset=ev_t + state["t_offset"],
-                                ),
-                            },
-                        )
-                        state["msg_queue"].append(msg)
+                    msg = replace(
+                        strm["template"],
+                        data=ev_labels,
+                        axes={
+                            **strm["template"].axes,
+                            "time": replace(
+                                strm["template"].axes["time"],
+                                data=ev_times + state["t_offset"],
+                            )
+                        },
+                    )
+                    state["msg_queue"].append(msg)
 
             else:
                 # TODO: spiketrain
