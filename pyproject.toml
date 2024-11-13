@@ -8,8 +8,8 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "ezmsg>=3.5.0",
-    "neo>=0.13.3",
+    "ezmsg>=3.6.0",
+    "neo>=0.13.4",
 ]
 dynamic = ["version"]
 
@@ -37,3 +37,8 @@ dev-dependencies = [
 ]
 
 [tool.uv.sources]
+
+[dependency-groups]
+test = [
+    "pytest>=8.3.3",
+]
