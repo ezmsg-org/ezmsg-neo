@@ -215,7 +215,7 @@ class NeoIterator:
                             "time": replace(
                                 strm["template"].axes["time"],
                                 data=ev_times + state["t_offset"],
-                            )
+                            ),
                         },
                     )
                     state["msg_queue"].append(msg)
@@ -234,9 +234,13 @@ class NeoIterator:
                         t_start=t_range[0],
                         t_stop=t_range[1],
                     )
-                    spike_times = self._reader.rescale_spike_timestamp(spike_times, dtype='float64')
+                    spike_times = self._reader.rescale_spike_timestamp(
+                        spike_times, dtype="float64"
+                    )
                     samp_idx = np.hstack((samp_idx, np.searchsorted(tvec, spike_times)))
-                    chan_idx = np.hstack((chan_idx, np.full((len(spike_times),), spk_ch_ix, dtype=int)))
+                    chan_idx = np.hstack(
+                        (chan_idx, np.full((len(spike_times),), spk_ch_ix, dtype=int))
+                    )
                     # raw_waveforms = reader.get_spike_raw_waveforms(block_index=0, seg_index=0, spike_channel_index=0,
                     #                                                t_start=0, t_stop=10)
                     # float_waveforms = reader.rescale_waveforms_to_float(raw_waveforms, dtype='float32', spike_channel_index=0)
@@ -249,7 +253,12 @@ class NeoIterator:
                 msg = replace(
                     strm["template"],
                     data=result,
-                    axes={**strm["template"].axes, "time": replace(strm["template"].axes["time"], offset=t_range[0])},
+                    axes={
+                        **strm["template"].axes,
+                        "time": replace(
+                            strm["template"].axes["time"], offset=t_range[0]
+                        ),
+                    },
                 )
                 state["msg_queue"].append(msg)
 

@@ -8,7 +8,9 @@ from ezmsg.neo.source import NeoIterator, NeoIteratorSettings
 
 
 def test_neo_iterator_raw():
-    local_path = Path(__file__).parents[0] / "data" / "blackrock" / "20231027-125608-001.nev"
+    local_path = (
+        Path(__file__).parents[0] / "data" / "blackrock" / "20231027-125608-001.nev"
+    )
     settings = NeoIteratorSettings(filepath=local_path)
     neo_iter = NeoIterator(settings)
 
@@ -27,7 +29,9 @@ def test_neo_iterator_raw():
 
 
 def test_neo_iterator_spike():
-    local_path = Path(__file__).parents[0] / "data" / "blackrock" / "20231027-125608-001.nev"
+    local_path = (
+        Path(__file__).parents[0] / "data" / "blackrock" / "20231027-125608-001.nev"
+    )
     settings = NeoIteratorSettings(filepath=local_path)
     neo_iter = NeoIterator(settings)
 
@@ -46,7 +50,7 @@ def test_neo_iterator_spike():
             seg_index=0,
             spike_channel_index=ch_ix,
         )
-        spike_times = reader.rescale_spike_timestamp(spike_times, dtype='float64')
+        spike_times = reader.rescale_spike_timestamp(spike_times, dtype="float64")
 
         # inds = cat.data[ch_ix].nonzero()[0]
         inds = cat.data[ch_ix].coords[0]
