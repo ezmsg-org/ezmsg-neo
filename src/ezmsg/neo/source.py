@@ -10,13 +10,14 @@ from ezmsg.util.generator import GenState
 from ezmsg.util.messages.axisarray import AxisArray, replace
 import neo.rawio.baserawio
 import numpy as np
+import sparse
 
 
 class NeoIteratorSettings(ez.Settings):
     """Settings for :obj:`NeoIterator`."""
 
     filepath: os.PathLike
-    chunk_dur: float = 0.1
+    chunk_dur: float = 0.05
     self_terminating: bool = True
     t_offset: typing.Optional[float] = None
 
@@ -116,8 +117,34 @@ class NeoIterator:
                 ),
             }
 
-        # TODO: Add support for spiketrain streams
-        # nb_unit = self._reader.spike_channels_count()
+        # spiketrain streams
+        nb_unit = self._reader.spike_channels_count()
+        if nb_unit > 0:
+            spk_chans = self._reader.header["spike_channels"]
+            if "wf_sampling_rate" in spk_chans.dtype.names:
+                spike_fs = spk_chans["wf_sampling_rate"][0]
+            else:
+                spike_fs = 30_000.0
+            if "name" in spk_chans.dtype.names:
+                spk_ch_labels = spk_chans["name"]
+            else:
+                spk_ch_labels = np.arange(1, 1 + nb_unit).astype(str)
+
+            self._playback_state["streams"]["spike"] = {
+                "type": "spiketrain",
+                "nchan": nb_unit,
+                "template": AxisArray(
+                    data=sparse.SparseArray((nb_unit, 0)),
+                    dims=["unit", "time"],
+                    axes={
+                        "unit": AxisArray.CoordinateAxis(
+                            data=spk_ch_labels, dims=["unit"], unit="unit"
+                        ),
+                        "time": AxisArray.TimeAxis(fs=spike_fs, offset=0.0),
+                    },
+                    key="spike",
+                ),
+            }
 
         t_elapsed = t_stop - self._playback_state["t_start"]
         self._playback_state["n_chunks"] = int(
@@ -162,6 +189,7 @@ class NeoIterator:
                     )
                     state["msg_queue"].append(msg)
                 strm["prev_samp"] = next_samp
+
             elif strm["type"] == "event":
                 # TODO: Event should probably use SampleTriggerMessage
                 for ev_ch_ix in range(strm["nchan"]):
@@ -192,16 +220,38 @@ class NeoIterator:
                     )
                     state["msg_queue"].append(msg)
 
-            else:
-                # TODO: spiketrain
-                # spike_timestamps = self._reader.get_spike_timestamps(block_index=0, seg_index=0, spike_channel_index=0,
-                #                                                t_start=0, t_stop=10)
-                # spike_timestamps
-                # spike_times = self._reader.rescale_spike_timestamp(spike_timestamps, dtype='float64')
-                # raw_waveforms = reader.get_spike_raw_waveforms(block_index=0, seg_index=0, spike_channel_index=0,
-                #                                                t_start=0, t_stop=10)
-                # float_waveforms = reader.rescale_waveforms_to_float(raw_waveforms, dtype='float32', spike_channel_index=0)
-                raise NotImplementedError(f"Unsupported stream type: {strm['type']}")
+            elif strm["type"] == "spiketrain":
+                samp_step = strm["template"].axes["time"].gain
+                n_times = int((t_range[1] - t_range[0]) / samp_step)
+                tvec = t_range[0] + np.arange(n_times) * samp_step
+                samp_idx = np.array([], dtype=int)
+                chan_idx = np.array([], dtype=int)
+                for spk_ch_ix in range(strm["nchan"]):
+                    spike_times = self._reader.get_spike_timestamps(
+                        block_index=0,
+                        seg_index=0,
+                        spike_channel_index=spk_ch_ix,
+                        t_start=t_range[0],
+                        t_stop=t_range[1],
+                    )
+                    spike_times = self._reader.rescale_spike_timestamp(spike_times, dtype='float64')
+                    samp_idx = np.hstack((samp_idx, np.searchsorted(tvec, spike_times)))
+                    chan_idx = np.hstack((chan_idx, np.full((len(spike_times),), spk_ch_ix, dtype=int)))
+                    # raw_waveforms = reader.get_spike_raw_waveforms(block_index=0, seg_index=0, spike_channel_index=0,
+                    #                                                t_start=0, t_stop=10)
+                    # float_waveforms = reader.rescale_waveforms_to_float(raw_waveforms, dtype='float32', spike_channel_index=0)
+                    # state["msg_queue"].append(msg)
+                result = sparse.COO(
+                    np.vstack((chan_idx, samp_idx)),
+                    data=1,
+                    shape=(strm["nchan"], len(tvec)),
+                )
+                msg = replace(
+                    strm["template"],
+                    data=result,
+                    axes={**strm["template"].axes, "time": replace(strm["template"].axes["time"], offset=t_range[0])},
+                )
+                state["msg_queue"].append(msg)
 
         state["chunk_ix"] += 1
 
