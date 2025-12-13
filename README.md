@@ -42,7 +42,8 @@ ez.run(components=comps, connections=conns)
 ## Setup (Development)
 
 1. Clone this repo and `cd` into it
-2. `uv sync --all-extras --dev --python 3.10` to setup your environment
+2. `uv sync` to setup your environment
 3. `uv run pytest tests` to run the tests
+4. (Optional) Install pre-commit hooks: `uv run pre-commit install`
 
 ezmsg-neo modules are available under `import ezmsg.neo`

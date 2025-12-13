@@ -162,3 +162,5 @@ cython_debug/
 #.idea/
 
 src/ezmsg/neo/__version__.py
+uv.lock
+*.local.json

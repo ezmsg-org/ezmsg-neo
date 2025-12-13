@@ -1,16 +1,14 @@
 from pathlib import Path
 
 import numpy as np
-from ezmsg.util.messages.axisarray import AxisArray
 from neo.rawio.blackrockrawio import BlackrockRawIO
 
 from ezmsg.neo.source import NeoIterator, NeoIteratorSettings
+from ezmsg.util.messages.axisarray import AxisArray
 
 
 def test_neo_iterator_raw():
-    local_path = (
-        Path(__file__).parents[0] / "data" / "blackrock" / "20231027-125608-001.nev"
-    )
+    local_path = Path(__file__).parents[0] / "data" / "blackrock" / "20231027-125608-001.nev"
     settings = NeoIteratorSettings(filepath=local_path)
     neo_iter = NeoIterator(settings)
 
@@ -29,9 +27,7 @@ def test_neo_iterator_raw():
 
 
 def test_neo_iterator_spike():
-    local_path = (
-        Path(__file__).parents[0] / "data" / "blackrock" / "20231027-125608-001.nev"
-    )
+    local_path = Path(__file__).parents[0] / "data" / "blackrock" / "20231027-125608-001.nev"
     settings = NeoIteratorSettings(filepath=local_path)
     neo_iter = NeoIterator(settings)
 
