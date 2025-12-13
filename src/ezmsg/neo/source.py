@@ -5,11 +5,10 @@ import typing
 from collections import deque
 from pathlib import Path
 
-import numpy as np
-import sparse
-
 import ezmsg.core as ez
 import neo.rawio.baserawio
+import numpy as np
+import sparse
 from ezmsg.util.generator import GenState
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
