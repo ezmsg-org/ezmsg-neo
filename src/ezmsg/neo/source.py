@@ -1,16 +1,17 @@
 import asyncio
-from collections import deque
 import os
-from pathlib import Path
 import time
 import typing
+from collections import deque
+from pathlib import Path
 
-import ezmsg.core as ez
-from ezmsg.util.generator import GenState
-from ezmsg.util.messages.axisarray import AxisArray, replace
-import neo.rawio.baserawio
 import numpy as np
 import sparse
+
+import ezmsg.core as ez
+import neo.rawio.baserawio
+from ezmsg.util.generator import GenState
+from ezmsg.util.messages.axisarray import AxisArray, replace
 
 
 class NeoIteratorSettings(ez.Settings):
@@ -31,9 +32,7 @@ class NeoIterator:
 
     def _reset(self):
         self._playback_state = {
-            "t_offset": self._settings.t_offset
-            if self._settings.t_offset is not None
-            else time.time(),
+            "t_offset": self._settings.t_offset if self._settings.t_offset is not None else time.time(),
             "t_start": np.inf,
             "chunk_ix": 0,
             "msg_queue": deque(),
@@ -70,9 +69,7 @@ class NeoIterator:
         # Fill out metadata for analogsignal streams
         for strm_ix in range(nb_sig_streams):
             t_start = self._reader.get_signal_t_start(0, 0, strm_ix)
-            self._playback_state["t_start"] = min(
-                self._playback_state["t_start"], t_start
-            )
+            self._playback_state["t_start"] = min(self._playback_state["t_start"], t_start)
             nb_chans = self._reader.signal_channels_count(strm_ix)
             fs = self._reader.get_signal_sampling_rate(strm_ix)
             nb_samps = self._reader.get_signal_size(0, 0, strm_ix)
@@ -84,9 +81,7 @@ class NeoIterator:
                 dims=["time", "ch"],
                 axes={
                     "time": AxisArray.TimeAxis(fs=fs, offset=0.0),
-                    "ch": AxisArray.CoordinateAxis(
-                        data=chan_struct_arr["name"], dims=["ch"], unit="label"
-                    ),
+                    "ch": AxisArray.CoordinateAxis(data=chan_struct_arr["name"], dims=["ch"], unit="label"),
                 },
                 key=key,
             )
@@ -108,11 +103,7 @@ class NeoIterator:
                 "template": AxisArray(
                     data=np.array([""]),
                     dims=["time"],
-                    axes={
-                        "time": AxisArray.CoordinateAxis(
-                            data=np.array([0]), dims=["time"], unit="s"
-                        )
-                    },
+                    axes={"time": AxisArray.CoordinateAxis(data=np.array([0]), dims=["time"], unit="s")},
                     key="events",
                 ),
             }
@@ -137,9 +128,7 @@ class NeoIterator:
                     data=sparse.SparseArray((nb_unit, 0)),
                     dims=["unit", "time"],
                     axes={
-                        "unit": AxisArray.CoordinateAxis(
-                            data=spk_ch_labels, dims=["unit"], unit="unit"
-                        ),
+                        "unit": AxisArray.CoordinateAxis(data=spk_ch_labels, dims=["unit"], unit="unit"),
                         "time": AxisArray.TimeAxis(fs=spike_fs, offset=0.0),
                     },
                     key="spike",
@@ -147,9 +136,7 @@ class NeoIterator:
             }
 
         t_elapsed = t_stop - self._playback_state["t_start"]
-        self._playback_state["n_chunks"] = int(
-            np.ceil(t_elapsed / self._settings.chunk_dur)
-        )
+        self._playback_state["n_chunks"] = int(np.ceil(t_elapsed / self._settings.chunk_dur))
 
     def __iter__(self):
         self._reset()
@@ -193,20 +180,16 @@ class NeoIterator:
             elif strm["type"] == "event":
                 # TODO: Event should probably use SampleTriggerMessage
                 for ev_ch_ix in range(strm["nchan"]):
-                    ev_timestamps, ev_durations, ev_labels = (
-                        self._reader.get_event_timestamps(
-                            block_index=0,
-                            seg_index=0,
-                            event_channel_index=ev_ch_ix,
-                            t_start=t_range[0],
-                            t_stop=t_range[1],
-                        )
+                    ev_timestamps, ev_durations, ev_labels = self._reader.get_event_timestamps(
+                        block_index=0,
+                        seg_index=0,
+                        event_channel_index=ev_ch_ix,
+                        t_start=t_range[0],
+                        t_stop=t_range[1],
                     )
                     if len(ev_timestamps) == 0:
                         continue
-                    ev_times = self._reader.rescale_event_timestamp(
-                        ev_timestamps, dtype=float
-                    )
+                    ev_times = self._reader.rescale_event_timestamp(ev_timestamps, dtype=float)
                     msg = replace(
                         strm["template"],
                         data=ev_labels,
@@ -234,16 +217,13 @@ class NeoIterator:
                         t_start=t_range[0],
                         t_stop=t_range[1],
                     )
-                    spike_times = self._reader.rescale_spike_timestamp(
-                        spike_times, dtype="float64"
-                    )
+                    spike_times = self._reader.rescale_spike_timestamp(spike_times, dtype="float64")
                     samp_idx = np.hstack((samp_idx, np.searchsorted(tvec, spike_times)))
-                    chan_idx = np.hstack(
-                        (chan_idx, np.full((len(spike_times),), spk_ch_ix, dtype=int))
-                    )
+                    chan_idx = np.hstack((chan_idx, np.full((len(spike_times),), spk_ch_ix, dtype=int)))
                     # raw_waveforms = reader.get_spike_raw_waveforms(block_index=0, seg_index=0, spike_channel_index=0,
                     #                                                t_start=0, t_stop=10)
-                    # float_waveforms = reader.rescale_waveforms_to_float(raw_waveforms, dtype='float32', spike_channel_index=0)
+                    # float_waveforms = reader.rescale_waveforms_to_float(
+                    #     raw_waveforms, dtype='float32', spike_channel_index=0)
                     # state["msg_queue"].append(msg)
                 result = sparse.COO(
                     np.vstack((chan_idx, samp_idx)),
@@ -255,9 +235,7 @@ class NeoIterator:
                     data=result,
                     axes={
                         **strm["template"].axes,
-                        "time": replace(
-                            strm["template"].axes["time"], offset=t_range[0]
-                        ),
+                        "time": replace(strm["template"].axes["time"], offset=t_range[0]),
                     },
                 )
                 state["msg_queue"].append(msg)
