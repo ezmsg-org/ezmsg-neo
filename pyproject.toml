@@ -20,7 +20,6 @@ dev = [
   "pre-commit>=4.0.0",
   {include-group = "lint"},
   {include-group = "test"},
-  {include-group = "docs"},
 ]
 lint = [
   "ruff",
