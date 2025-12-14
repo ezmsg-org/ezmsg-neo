@@ -1,10 +1,10 @@
 from pathlib import Path
 
 import numpy as np
+from ezmsg.util.messages.axisarray import AxisArray
 from neo.rawio.blackrockrawio import BlackrockRawIO
 
 from ezmsg.neo.source import NeoIterator, NeoIteratorSettings
-from ezmsg.util.messages.axisarray import AxisArray
 
 
 def test_neo_iterator_raw():
