@@ -5,4 +5,4 @@ API Reference
    :toctree: generated
    :recursive:
 
-   ezmsg.example
+   ezmsg.neo

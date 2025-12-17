@@ -1,4 +1,4 @@
-ezmsg.example
+ezmsg.neo
 =============
 
 Short description of your ezmsg package.
@@ -6,7 +6,7 @@ Short description of your ezmsg package.
 Overview
 --------
 
-``ezmsg-example`` provides ... for the `ezmsg <https://www.ezmsg.org>`_ framework.
+``ezmsg-neo`` provides ... for the `ezmsg <https://www.ezmsg.org>`_ framework.
 
 Key features:
 
@@ -21,13 +21,13 @@ Install from PyPI:
 
 .. code-block:: bash
 
-   pip install ezmsg-example
+   pip install ezmsg-neo
 
 Or install the latest development version:
 
 .. code-block:: bash
 
-   pip install git+https://github.com/ezmsg-org/ezmsg-example@main
+   pip install git+https://github.com/ezmsg-org/ezmsg-neo@main
 
 Dependencies
 ^^^^^^^^^^^^
@@ -42,12 +42,6 @@ Quick Start
 
 For general ezmsg tutorials and guides, visit `ezmsg.org <https://www.ezmsg.org>`_.
 
-.. code-block:: python
-
-   import ezmsg.core as ez
-   from ezmsg.example import MyUnit
-
-   # Your example code here
 
 Documentation
 -------------
