@@ -68,4 +68,4 @@ known-third-party = ["neo", "ezmsg"]
 
 [tool.uv.sources]
 # Uncomment to use development version of ezmsg from git
-ezmsg = { git = "https://github.com/ezmsg-org/ezmsg.git", branch = "dev" }
+#ezmsg = { git = "https://github.com/ezmsg-org/ezmsg.git", branch = "dev" }
