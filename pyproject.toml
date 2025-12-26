@@ -11,8 +11,8 @@ requires-python = ">=3.10.15"
 dependencies = [
     "ezmsg>=3.6.0",
     "neo>=0.13.4",
-    "numpy>=1.26.4",
-    "sparse>=0.15.4",
+    "numpy>=2.2.6",
+    "sparse>=0.17.0",
 ]
 
 [dependency-groups]
