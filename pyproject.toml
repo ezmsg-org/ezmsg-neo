@@ -11,6 +11,7 @@ requires-python = ">=3.10.15"
 dependencies = [
     "ezmsg>=3.6.0",
     "neo>=0.13.4",
+    "numba>=0.61.0",
     "numpy>=2.2.6",
     "sparse>=0.17.0",
 ]
