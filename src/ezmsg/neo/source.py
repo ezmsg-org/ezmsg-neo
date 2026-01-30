@@ -9,7 +9,6 @@ import ezmsg.core as ez
 import neo.rawio.baserawio
 import numpy as np
 import sparse
-from ezmsg.util.generator import GenState
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
 
@@ -255,8 +254,12 @@ class NeoIterator:
         return state["msg_queue"].popleft()
 
 
+class NeoIteratorState(ez.State):
+    gen: typing.Any = None
+
+
 class NeoIteratorUnit(ez.Unit):
-    STATE = GenState
+    STATE = NeoIteratorState
     SETTINGS = NeoIteratorSettings
 
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
