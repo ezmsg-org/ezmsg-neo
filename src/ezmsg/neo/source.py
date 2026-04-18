@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import asyncio
+import math
 import os
 import time
 import typing
@@ -9,6 +12,9 @@ import ezmsg.core as ez
 import neo.rawio.baserawio
 import numpy as np
 import sparse
+from ezmsg.baseproc.protocols import processor_state
+from ezmsg.baseproc.stateful import BaseStatefulProducer
+from ezmsg.baseproc.units import BaseProducerUnit
 from ezmsg.util.messages.axisarray import AxisArray, replace
 
 
@@ -21,26 +27,40 @@ class NeoIteratorSettings(ez.Settings):
     t_offset: typing.Optional[float] = None
 
 
-class NeoIterator:
-    def __init__(self, settings: NeoIteratorSettings):
-        self._settings = settings
-        self._reader: typing.Optional[neo.rawio.baserawio.BaseRawIO] = None
-        self._playback_state: typing.Optional[dict] = None
-        self._reset()
+@processor_state
+class NeoIteratorState:
+    t_offset: float = 0.0
+    t_start: float = 0.0
+    chunk_ix: int = 0
+    n_chunks: int = 0
+    reader: neo.rawio.baserawio.BaseRawIO | None = None
+    streams: dict | None = None
+    deque: deque | None = None
 
-    def _reset(self):
-        self._playback_state = {
-            "t_offset": self._settings.t_offset if self._settings.t_offset is not None else time.time(),
-            "t_start": np.inf,
-            "chunk_ix": 0,
-            "msg_queue": deque(),
-            "streams": {},
-        }
+
+class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIteratorState]):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Eagerly initialize so metadata is available immediately after construction.
+        self._reset_state()
+        self._hash = 0
+
+    @property
+    def exhausted(self) -> bool:
+        return self._state.chunk_ix >= self._state.n_chunks and not self._state.deque
+
+    def _reset_state(self) -> None:
+        self._state.t_offset = self.settings.t_offset if self.settings.t_offset is not None else time.time()
+        self._state.t_start = float(np.inf)
+        self._state.chunk_ix = 0
+        self._state.n_chunks = 0
+        self._state.streams = {}
+        self._state.deque = deque()
+        self._state.reader = None
         self._preload()
 
-    def _preload(self):
-        fpath = Path(self._settings.filepath)
-
+    def _preload(self) -> None:
+        fpath = Path(self.settings.filepath)
         if not fpath.exists():
             raise FileNotFoundError(f"File not found: {fpath}")
 
@@ -51,29 +71,32 @@ class NeoIterator:
         else:
             raise ValueError(f"Unsupported file type: {fpath.suffix}")
 
-        self._reader = RawIO(filename=str(fpath))
-        self._reader.parse_header()
+        reader = RawIO(filename=str(fpath))
+        reader.parse_header()
 
-        nb_block = self._reader.block_count()
+        nb_block = reader.block_count()
         if nb_block > 1:
             raise NotImplementedError("Only single-block files are supported.")
-        nb_seg = [self._reader.segment_count(_) for _ in range(nb_block)][0]
+        nb_seg = reader.segment_count(0)
         if nb_seg > 1:
             raise NotImplementedError("Only single-segment files are supported.")
-        nb_sig_streams = self._reader.signal_streams_count()
 
+        self._state.reader = reader
+        streams: dict = self._state.streams
+        t_start = np.inf
         t_stop = -np.inf
 
-        # Fill out metadata for analogsignal streams
+        # analogsignal streams
+        nb_sig_streams = reader.signal_streams_count()
         for strm_ix in range(nb_sig_streams):
-            t_start = self._reader.get_signal_t_start(0, 0, strm_ix)
-            self._playback_state["t_start"] = min(self._playback_state["t_start"], t_start)
-            nb_chans = self._reader.signal_channels_count(strm_ix)
-            fs = self._reader.get_signal_sampling_rate(strm_ix)
-            nb_samps = self._reader.get_signal_size(0, 0, strm_ix)
-            t_stop = max(t_stop, t_start + nb_samps / fs)
-            chan_struct_arr = self._reader.header["signal_channels"]
-            key = self._reader.header["signal_streams"][strm_ix]["name"]
+            s_t_start = reader.get_signal_t_start(0, 0, strm_ix)
+            t_start = min(t_start, s_t_start)
+            nb_chans = reader.signal_channels_count(strm_ix)
+            fs = reader.get_signal_sampling_rate(strm_ix)
+            nb_samps = reader.get_signal_size(0, 0, strm_ix)
+            t_stop = max(t_stop, s_t_start + nb_samps / fs)
+            chan_struct_arr = reader.header["signal_channels"]
+            key = reader.header["signal_streams"][strm_ix]["name"]
             template = AxisArray(
                 data=np.zeros((0, nb_chans), dtype=float),
                 dims=["time", "ch"],
@@ -83,19 +106,19 @@ class NeoIterator:
                 },
                 key=key,
             )
-            self._playback_state["streams"][key] = {
+            streams[key] = {
                 "idx": strm_ix,
                 "type": "analogsignal",
-                "t_start": t_start,
+                "t_start": s_t_start,
                 "template": template,
                 "prev_samp": 0,
             }
 
-        # Fill out metadata for event streams
-        nb_event_channel = self._reader.event_channels_count()
+        # event streams
+        nb_event_channel = reader.event_channels_count()
         if nb_event_channel > 0:
             # TODO: Event should probably use SampleTriggerMessage
-            self._playback_state["streams"]["events"] = {
+            streams["events"] = {
                 "type": "event",
                 "nchan": nb_event_channel,
                 "template": AxisArray(
@@ -107,9 +130,9 @@ class NeoIterator:
             }
 
         # spiketrain streams
-        nb_unit = self._reader.spike_channels_count()
+        nb_unit = reader.spike_channels_count()
         if nb_unit > 0:
-            spk_chans = self._reader.header["spike_channels"]
+            spk_chans = reader.header["spike_channels"]
             if "wf_sampling_rate" in spk_chans.dtype.names:
                 spike_fs = spk_chans["wf_sampling_rate"][0]
             else:
@@ -119,7 +142,7 @@ class NeoIterator:
             else:
                 spk_ch_labels = np.arange(1, 1 + nb_unit).astype(str)
 
-            self._playback_state["streams"]["spike"] = {
+            streams["spike"] = {
                 "type": "spiketrain",
                 "nchan": nb_unit,
                 "template": AxisArray(
@@ -133,34 +156,28 @@ class NeoIterator:
                 ),
             }
 
-        t_elapsed = t_stop - self._playback_state["t_start"]
-        self._playback_state["n_chunks"] = int(np.ceil(t_elapsed / self._settings.chunk_dur))
+        self._state.t_start = t_start
+        t_elapsed = t_stop - t_start
+        self._state.n_chunks = int(np.ceil(t_elapsed / self.settings.chunk_dur))
 
-    def __iter__(self):
-        self._reset()
-        return self
+    def _chunk_step(self) -> None:
+        state = self._state
+        reader = state.reader
+        t_range = (np.arange(2) + state.chunk_ix) * self.settings.chunk_dur + state.t_start
 
-    def _chunk_step(self):
-        state = self._playback_state
-        t_range = (np.arange(2) + state["chunk_ix"]) * self._settings.chunk_dur
-        if True:
-            # Offset by global t_start
-            t_range += self._playback_state["t_start"]
-
-        for key, strm in state["streams"].items():
+        for key, strm in state.streams.items():
             if strm["type"] == "analogsignal":
-                # Fetch data from last_idx to next_idx = next_time * fs
                 fs = 1 / strm["template"].axes["time"].gain
                 prev_samp = strm["prev_samp"]
                 next_samp = max(0, int((t_range[1] - strm["t_start"]) * fs))
-                dat = self._reader.get_analogsignal_chunk(
+                dat = reader.get_analogsignal_chunk(
                     seg_index=0,
                     stream_index=strm["idx"],
                     i_start=prev_samp,
                     i_stop=next_samp,
                 )
                 if dat.size:
-                    dat = self._reader.rescale_signal_raw_to_float(dat, dtype=float)
+                    dat = reader.rescale_signal_raw_to_float(dat, dtype=float)
                     msg = replace(
                         strm["template"],
                         data=dat,
@@ -168,17 +185,17 @@ class NeoIterator:
                             **strm["template"].axes,
                             "time": replace(
                                 strm["template"].axes["time"],
-                                offset=state["t_offset"] + prev_samp / fs,
+                                offset=state.t_offset + prev_samp / fs,
                             ),
                         },
                     )
-                    state["msg_queue"].append(msg)
+                    state.deque.append(msg)
                 strm["prev_samp"] = next_samp
 
             elif strm["type"] == "event":
                 # TODO: Event should probably use SampleTriggerMessage
                 for ev_ch_ix in range(strm["nchan"]):
-                    ev_timestamps, ev_durations, ev_labels = self._reader.get_event_timestamps(
+                    ev_timestamps, ev_durations, ev_labels = reader.get_event_timestamps(
                         block_index=0,
                         seg_index=0,
                         event_channel_index=ev_ch_ix,
@@ -187,7 +204,7 @@ class NeoIterator:
                     )
                     if len(ev_timestamps) == 0:
                         continue
-                    ev_times = self._reader.rescale_event_timestamp(ev_timestamps, dtype=float)
+                    ev_times = reader.rescale_event_timestamp(ev_timestamps, dtype=float)
                     msg = replace(
                         strm["template"],
                         data=ev_labels,
@@ -195,11 +212,11 @@ class NeoIterator:
                             **strm["template"].axes,
                             "time": replace(
                                 strm["template"].axes["time"],
-                                data=ev_times + state["t_offset"],
+                                data=ev_times + state.t_offset,
                             ),
                         },
                     )
-                    state["msg_queue"].append(msg)
+                    state.deque.append(msg)
 
             elif strm["type"] == "spiketrain":
                 samp_step = strm["template"].axes["time"].gain
@@ -208,21 +225,20 @@ class NeoIterator:
                 samp_idx = np.array([], dtype=int)
                 chan_idx = np.array([], dtype=int)
                 for spk_ch_ix in range(strm["nchan"]):
-                    spike_times = self._reader.get_spike_timestamps(
+                    spike_times = reader.get_spike_timestamps(
                         block_index=0,
                         seg_index=0,
                         spike_channel_index=spk_ch_ix,
                         t_start=t_range[0],
                         t_stop=t_range[1],
                     )
-                    spike_times = self._reader.rescale_spike_timestamp(spike_times, dtype="float64")
+                    spike_times = reader.rescale_spike_timestamp(spike_times, dtype="float64")
                     samp_idx = np.hstack((samp_idx, np.searchsorted(tvec, spike_times)))
                     chan_idx = np.hstack((chan_idx, np.full((len(spike_times),), spk_ch_ix, dtype=int)))
                     # raw_waveforms = reader.get_spike_raw_waveforms(block_index=0, seg_index=0, spike_channel_index=0,
                     #                                                t_start=0, t_stop=10)
                     # float_waveforms = reader.rescale_waveforms_to_float(
                     #     raw_waveforms, dtype='float32', spike_channel_index=0)
-                    # state["msg_queue"].append(msg)
                 result = sparse.COO(
                     np.vstack((chan_idx, samp_idx)),
                     data=1,
@@ -236,49 +252,44 @@ class NeoIterator:
                         "time": replace(strm["template"].axes["time"], offset=t_range[0]),
                     },
                 )
-                state["msg_queue"].append(msg)
+                state.deque.append(msg)
 
-        state["chunk_ix"] += 1
+        state.chunk_ix += 1
+
+    async def _produce(self) -> AxisArray | None:
+        state = self._state
+        if not state.deque:
+            if state.chunk_ix >= state.n_chunks:
+                return None
+            self._chunk_step()
+        if not state.deque:
+            return None
+        return state.deque.popleft()
 
     def __next__(self) -> AxisArray:
-        state = self._playback_state
-        if not state["msg_queue"]:
-            if state["chunk_ix"] >= state["n_chunks"]:
-                # TODO Close file
-                raise StopIteration
-            self._chunk_step()
-
-        if not state["msg_queue"]:
+        result = self()
+        if result is None:
             raise StopIteration
-
-        return state["msg_queue"].popleft()
-
-
-class NeoIteratorState(ez.State):
-    gen: typing.Any = None
+        return result
 
 
-class NeoIteratorUnit(ez.Unit):
-    STATE = NeoIteratorState
+class NeoIteratorUnit(BaseProducerUnit[NeoIteratorSettings, AxisArray, NeoIterator]):
     SETTINGS = NeoIteratorSettings
 
     OUTPUT_SIGNAL = ez.OutputStream(AxisArray)
     OUTPUT_TERM = ez.OutputStream(typing.Any)
 
-    def initialize(self) -> None:
-        self.construct_generator()
-
-    def construct_generator(self):
-        self.STATE.gen = NeoIterator(
-            settings=self.SETTINGS,
-        )
-
     @ez.publisher(OUTPUT_SIGNAL)
-    async def pub_chunk(self) -> typing.AsyncGenerator:
-        for msg in self.STATE.gen:
-            # TODO: Direct msg to OUTPUT_TRIGGER if type is SampleTriggerMessage
-            yield self.OUTPUT_SIGNAL, msg
-            await asyncio.sleep(0)
+    async def produce(self) -> typing.AsyncGenerator:
+        while True:
+            out = await self.producer.__acall__()
+            if out is not None:
+                if math.prod(out.data.shape) > 0:
+                    # TODO: Direct msg to OUTPUT_TRIGGER if type is SampleTriggerMessage
+                    yield self.OUTPUT_SIGNAL, out
+                await asyncio.sleep(0)
+            elif self.producer.exhausted:
+                break
 
         ez.logger.debug(f"File ({self.SETTINGS.filepath}) exhausted.")
         if self.SETTINGS.self_terminating:
