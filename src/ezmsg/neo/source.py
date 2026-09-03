@@ -97,14 +97,24 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
             t_stop = max(t_stop, s_t_start + nb_samps / fs)
             chan_struct_arr = reader.header["signal_channels"]
             key = reader.header["signal_streams"][strm_ix]["name"]
+            ch_ax = AxisArray.CoordinateAxis(data=chan_struct_arr["name"], dims=["ch"], unit="label")
+            # Compute the channel fingerprint once, now. It is cached on the axis
+            # and pickled with it, and every message from this stream reuses this
+            # same axis object, so one checksum covers the whole file. Left cold it
+            # would be computed by the first stateful consumer in this process --
+            # and, since unpickling builds a new axis object per message, by the
+            # first consumer in every other process, on every message.
+            ch_ax.fingerprint
             template = AxisArray(
                 data=np.zeros((0, nb_chans), dtype=float),
                 dims=["time", "ch"],
                 axes={
                     "time": AxisArray.TimeAxis(fs=fs, offset=0.0),
-                    "ch": AxisArray.CoordinateAxis(data=chan_struct_arr["name"], dims=["ch"], unit="label"),
+                    "ch": ch_ax,
                 },
                 key=key,
+                # Messages append along `time`; `ch` describes the stream.
+                chunk_dim="time",
             )
             streams[key] = {
                 "idx": strm_ix,
@@ -126,6 +136,10 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                     dims=["time"],
                     axes={"time": AxisArray.CoordinateAxis(data=np.array([0]), dims=["time"], unit="s")},
                     key="events",
+                    # Irregular, but still the dimension events accumulate along.
+                    # Deliberately not primed: its values are per-message, and the
+                    # chunk axis is the one axis consumers do not digest.
+                    chunk_dim="time",
                 ),
             }
 
@@ -142,6 +156,8 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
             else:
                 spk_ch_labels = np.arange(1, 1 + nb_unit).astype(str)
 
+            unit_ax = AxisArray.CoordinateAxis(data=spk_ch_labels, dims=["unit"], unit="unit")
+            unit_ax.fingerprint  # primed once for the file -- see the signal stream above
             streams["spike"] = {
                 "type": "spiketrain",
                 "nchan": nb_unit,
@@ -149,10 +165,13 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                     data=sparse.SparseArray((nb_unit, 0)),
                     dims=["unit", "time"],
                     axes={
-                        "unit": AxisArray.CoordinateAxis(data=spk_ch_labels, dims=["unit"], unit="unit"),
+                        "unit": unit_ax,
                         "time": AxisArray.TimeAxis(fs=spike_fs, offset=0.0),
                     },
                     key="spike",
+                    # Spikes accumulate along `time` even though it trails here;
+                    # `unit` describes the sorted units and is what consumers key on.
+                    chunk_dim="time",
                 ),
             }
 
