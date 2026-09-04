@@ -52,3 +52,50 @@ def test_neo_iterator_spike():
         inds = cat.data[ch_ix].coords[0]
         ez_times = cat.axes["time"].value(inds)
         assert np.allclose(ez_times, spike_times)
+
+
+class TestMessagesArriveReadyForConsumers:
+    """Two things only the source can supply, both set once per file.
+
+    ``chunk_dim`` names the dimension messages accumulate along -- the one whose
+    length is just however much of the file this chunk covered, and which a
+    consumer must leave out of the state it caches against the stream's
+    configuration. ``fingerprint`` is a coordinate axis's content digest, cached
+    on the axis and pickled with it; priming it here spares the first consumer
+    in every process from recomputing it on every message.
+    """
+
+    @staticmethod
+    def _messages():
+        local_path = Path(__file__).parents[0] / "data" / "blackrock" / "20231027-125608-001.nev"
+        return list(NeoIterator(NeoIteratorSettings(filepath=local_path)))
+
+    def test_every_message_declares_its_chunk_dim(self):
+        msgs = self._messages()
+        assert msgs, "no messages produced"
+        undeclared = sorted({m.key for m in msgs if m.chunk_dim != "time"})
+        assert not undeclared, f"streams not declaring chunk_dim='time': {undeclared}"
+
+    def test_the_signal_channel_axis_is_primed(self):
+        sig = next(m for m in self._messages() if m.key.startswith("ns"))
+        assert "_fingerprint" in sig.axes["ch"].__dict__
+        assert sig.axes["ch"].fingerprint is not None
+
+    def test_the_spike_unit_axis_is_primed(self):
+        spk = next(m for m in self._messages() if m.key.startswith("spike"))
+        assert "_fingerprint" in spk.axes["unit"].__dict__
+        assert spk.axes["unit"].fingerprint is not None
+
+    def test_the_chunk_axis_is_left_cold(self):
+        """Digesting per-message timestamps would be pure cost: no consumer reads
+        the chunk axis's fingerprint."""
+        spk = next(m for m in self._messages() if m.key.startswith("spike"))
+        assert "_fingerprint" not in spk.axes["time"].__dict__
+
+    def test_it_all_survives_the_transport(self):
+        import pickle
+
+        sig = next(m for m in self._messages() if m.key.startswith("ns"))
+        landed = pickle.loads(pickle.dumps(sig))
+        assert landed.chunk_dim == "time"
+        assert "_fingerprint" in landed.axes["ch"].__dict__
