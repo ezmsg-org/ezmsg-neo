@@ -114,7 +114,7 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                 },
                 key=key,
                 # Messages append along `time`; `ch` describes the stream.
-                chunk_dim="time",
+                stream_dim="time",
             )
             streams[key] = {
                 "idx": strm_ix,
@@ -138,8 +138,8 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                     key="events",
                     # Irregular, but still the dimension events accumulate along.
                     # Deliberately not primed: its values are per-message, and the
-                    # chunk axis is the one axis consumers do not digest.
-                    chunk_dim="time",
+                    # stream axis is the one axis consumers do not digest.
+                    stream_dim="time",
                 ),
             }
 
@@ -171,7 +171,7 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                     key="spike",
                     # Spikes accumulate along `time` even though it trails here;
                     # `unit` describes the sorted units and is what consumers key on.
-                    chunk_dim="time",
+                    stream_dim="time",
                 ),
             }
 
