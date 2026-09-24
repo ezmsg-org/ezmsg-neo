@@ -18,6 +18,11 @@ dependencies = [
     "sparse>=0.17.0",
 ]
 
+
+[project.entry-points."ezmsg.components"]
+"neo.NeoIteratorUnit" = "ezmsg.neo.source:NeoIteratorUnit"
+
+
 [dependency-groups]
 dev = [
   "pre-commit>=4.0.0",
