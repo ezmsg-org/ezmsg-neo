@@ -10,13 +10,18 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     # 3.10.0b3 for AxisArray.stream_dim and CoordinateAxis.fingerprint.
-    "ezmsg>=3.10.0b3",
+    "ezmsg>=3.10.0b4",
     "ezmsg-baseproc>=1.6.0",
     "neo>=0.14.4",
     "numba>=0.61.0",
     "numpy>=2.2.6",
     "sparse>=0.17.0",
 ]
+
+
+[project.entry-points."ezmsg.components"]
+"neo.NeoIteratorUnit" = "ezmsg.neo.source:NeoIteratorUnit"
+
 
 [dependency-groups]
 dev = [
