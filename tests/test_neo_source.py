@@ -28,7 +28,8 @@ def test_neo_iterator_raw():
 
 def test_neo_iterator_spike():
     local_path = Path(__file__).parents[0] / "data" / "blackrock" / "20231027-125608-001.nev"
-    settings = NeoIteratorSettings(filepath=local_path)
+    # t_offset=0: times are seconds from the start of the file.
+    settings = NeoIteratorSettings(filepath=local_path, t_offset=0.0)
     neo_iter = NeoIterator(settings)
 
     spk_msgs = [msg for msg in neo_iter if msg.key.startswith("spike")]
@@ -51,7 +52,9 @@ def test_neo_iterator_spike():
         # inds = cat.data[ch_ix].nonzero()[0]
         inds = cat.data[ch_ix].coords[0]
         ez_times = cat.axes["time"].value(inds)
-        assert np.allclose(ez_times, spike_times)
+        # Within a sample of the file's spike times, counted from the start of the file.
+        # (The file's times are epoch-scale, so comparing them directly would pass on anything.)
+        assert np.allclose(ez_times, spike_times - reader.segment_t_start(0, 0), rtol=0, atol=2 / 30_000)
 
 
 class TestMessagesArriveReadyForConsumers:
