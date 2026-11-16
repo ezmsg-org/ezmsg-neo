@@ -12,10 +12,11 @@ import ezmsg.core as ez
 import neo.rawio.baserawio
 import numpy as np
 import sparse
+from ezmsg.baseproc import end_of_stream
 from ezmsg.baseproc.protocols import processor_state
 from ezmsg.baseproc.stateful import BaseStatefulProducer
 from ezmsg.baseproc.units import BaseProducerUnit
-from ezmsg.util.messages.axisarray import AxisArray, replace
+from ezmsg.util.messages.axisarray import AxisArray, compute_config_id, replace
 
 
 class NeoIteratorSettings(ez.Settings):
@@ -46,7 +47,8 @@ class NeoIteratorState:
     seg_ix: int = 0
     n_segs: int = 0
     first_segment: int = 0
-    """The output ``segment`` of neo segment 0."""
+    """The output ``segment`` of neo segment 0. Neo segment ``k`` is ``first_segment + k``, and
+    each stream's end-of-stream marker, after the last neo segment, one more than its last data."""
     chunk_ix: int = 0
     n_chunks: int = 0
     reader: neo.rawio.baserawio.BaseRawIO | None = None
@@ -57,6 +59,7 @@ class NeoIteratorState:
 class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIteratorState]):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._next_segment = 0
         # Eagerly initialize so metadata is available immediately after construction.
         self._reset_state()
         self._hash = 0
@@ -69,7 +72,7 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
         self._state.t_offset = self.settings.t_offset if self.settings.t_offset is not None else time.time()
         self._state.t_start = float(np.inf)
         # Reopening the file continues nothing: carry on numbering where the last pass stopped.
-        self._state.first_segment = getattr(self, "_next_segment", 0)
+        self._state.first_segment = self._next_segment
         self._state.seg_ix = 0
         self._state.n_segs = 0
         self._state.chunk_ix = 0
@@ -103,7 +106,7 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
 
         self._state.reader = reader
         self._state.n_segs = reader.segment_count(0)
-        self._next_segment = self._state.first_segment + self._state.n_segs
+        self._next_segment = self._state.first_segment + self._state.n_segs + 1  # + 1: the end markers
         streams: dict = self._state.streams
 
         # analogsignal streams
@@ -152,7 +155,8 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                 "type": "event",
                 "nchan": nb_event_channel,
                 "template": AxisArray(
-                    data=np.array([""]),
+                    # object, not str: the labels' str width varies by message and is part of config_id.
+                    data=np.array([], dtype=object),
                     dims=["time"],
                     axes={"time": AxisArray.CoordinateAxis(data=np.array([0]), dims=["time"], unit="s")},
                     key="events",
@@ -182,7 +186,7 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                 "type": "spiketrain",
                 "nchan": nb_unit,
                 "template": AxisArray(
-                    data=sparse.SparseArray((nb_unit, 0)),
+                    data=sparse.zeros((nb_unit, 0), dtype=int),  # the dtype of the COO each chunk builds
                     dims=["unit", "time"],
                     axes={
                         "unit": unit_ax,
@@ -194,6 +198,9 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                     stream_dim="time",
                 ),
             }
+
+        for strm in streams.values():
+            strm["template"].config_id = compute_config_id(strm["template"])
 
         self._start_segment(0)
         self._state.file_t_start = self._state.t_start
@@ -260,6 +267,7 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                         segment=segment,
                     )
                     state.deque.append(msg)
+                    strm["last"] = msg
                 strm["prev_samp"] = max(next_samp, prev_samp)
 
             elif strm["type"] == "event":
@@ -277,7 +285,7 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                     ev_times = reader.rescale_event_timestamp(ev_timestamps, dtype=float)
                     msg = replace(
                         strm["template"],
-                        data=ev_labels,
+                        data=ev_labels.astype(object),
                         axes={
                             **strm["template"].axes,
                             "time": replace(
@@ -288,6 +296,7 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                         segment=segment,
                     )
                     state.deque.append(msg)
+                    strm["last"] = msg
 
             elif strm["type"] == "spiketrain":
                 samp_step = strm["template"].axes["time"].gain
@@ -327,10 +336,17 @@ class NeoIterator(BaseStatefulProducer[NeoIteratorSettings, AxisArray, NeoIterat
                     segment=segment,
                 )
                 state.deque.append(msg)
+                strm["last"] = msg
 
         state.chunk_ix += 1
         if state.chunk_ix >= state.n_chunks:
+            # The neo segment is over. A gap is just the next segment's number; the end of the file is
+            # said once per stream, with an empty marker.
             self._start_segment(seg_ix + 1)
+            if state.seg_ix >= state.n_segs:
+                for strm in state.streams.values():
+                    if "last" in strm:
+                        state.deque.append(end_of_stream(strm.pop("last")))
 
     async def _produce(self) -> AxisArray | None:
         state = self._state
@@ -357,10 +373,13 @@ class NeoIteratorUnit(BaseProducerUnit[NeoIteratorSettings, AxisArray, NeoIterat
 
     @ez.publisher(OUTPUT_SIGNAL)
     async def produce(self) -> typing.AsyncGenerator:
+        segments = {}
         while True:
             out = await self.producer.__acall__()
             if out is not None:
-                if math.prod(out.data.shape) > 0:
+                # An empty chunk carries nothing, but an empty end_of_stream marker starts a new segment.
+                if math.prod(out.data.shape) > 0 or segments.get(out.key, out.segment) != out.segment:
+                    segments[out.key] = out.segment
                     # TODO: Direct msg to OUTPUT_TRIGGER if type is SampleTriggerMessage
                     yield self.OUTPUT_SIGNAL, out
                 await asyncio.sleep(0)
